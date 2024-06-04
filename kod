@@ -1,0 +1,91 @@
+#include <WiFi.h>
+#include <FirebaseESP32.h>
+#include <Servo.h>
+
+// Firebase konfigurace
+#define FIREBASE_HOST "kantor-vaclavik-chytraprehrada"
+#define FIREBASE_AUTH "AIzaSyCrxJkg9rGE_H-7J2mWNa5kZLLusWMVatY"
+
+// Wi-Fi konfigurace
+const char* ssid = "UC-17LoT";
+const char* password = "teleinformatika.eu";
+
+// Definice pinů
+const int trigPin = 4;
+const int echoPin = 5;
+const int ledPin = 19;
+const int servoPin = 18;
+
+// Inicializace serva
+Servo myServo;
+
+FirebaseData firebaseData;
+
+void setup() {
+  // Nastavení pinů
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+
+  // Inicializace sériové komunikace
+  Serial.begin(115200);
+
+  // Připojení k Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+
+  // Inicializace Firebase
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  Firebase.reconnectWiFi(true);
+
+  // Připojení serva
+  myServo.attach(servoPin);
+  myServo.write(0); // Ventil zavřený na začátku
+}
+
+void loop() {
+  // Vyslání ultrazvukového pulzu
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  // Příjem ozvěny
+  long duration = pulseIn(echoPin, HIGH);
+  int distance = duration * 0.034 / 2;
+
+  // Výstup vzdálenosti do sériového monitoru
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.println(" cm");
+
+  // Logika pro ovládání ventilu a odesílání dat do Firebase
+  if (distance < 10) { // Pokud je hladina vody příliš vysoká
+    digitalWrite(ledPin, HIGH); // Zapni LED
+    myServo.write(90); // Otevři ventil
+
+    // Odeslání dat do Firebase
+    if (Firebase.setInt(firebaseData, "/waterLevel", distance)) {
+      Serial.println("Data sent to Firebase");
+    } else {
+      Serial.println("Failed to send data to Firebase");
+    }
+
+    // Odeslání notifikace
+    if (Firebase.pushString(firebaseData, "/notifications", "Warning: High water level detected!")) {
+      Serial.println("Notification sent");
+    } else {
+      Serial.println("Failed to send notification");
+    }
+  } else {
+    digitalWrite(ledPin, LOW); // Vypni LED
+    myServo.write(0); // Zavři ventil
+  }
+
+  delay(1000); // Počkej jednu sekundu před dalším měřením
+}
